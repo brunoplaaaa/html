@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <script src="https://jsdelivr.net"></script>
 <meta charset="UTF-8">
+<!-- PARCHE DE SEGURIDAD PARA GITHUB PAGES -->
+<script src="https://jsdelivr.net"></script>
 <title>Compresor de Video — 100% en el navegador</title>
 <style>
   :root{
@@ -89,12 +90,12 @@
 <div id="app">
   <div class="eyebrow">WebAssembly · ffmpeg.wasm</div>
   <h1>Compresor de video en el navegador</h1>
-  <p class="lede">Corre <b>ffmpeg real compilado a WebAssembly</b>, 100% local: el archivo nunca se sube a ningún servidor. Bajás resolución/bitrate y descargás el resultado ahí mismo.</p>
+  <p class="lede">Corre <b>ffmpeg real compilado a WebAssembly</b>, 100% local: el archivo nunca se sube a ningún servidor.</p>
 
   <div class="card">
     <h2>01 · Motor</h2>
     <div id="engineRow">
-      <div id="engineStatus">Motor no cargado (~25&nbsp;MB, se descarga una sola vez).</div>
+      <div id="engineStatus">Motor no cargado (~25 MB).</div>
       <button class="primary" id="loadBtn">Cargar motor</button>
     </div>
     <div class="barOuter"><div class="barInner" id="loadBar"></div></div>
@@ -123,22 +124,6 @@
       <input type="range" id="crf" min="18" max="35" step="1" value="28">
       <span class="val" id="v_crf">28 (media)</span>
     </div>
-    <div class="row">
-      <label>Velocidad encode</label>
-      <select id="preset">
-        <option value="ultrafast">Ultrafast (archivo más pesado)</option>
-        <option value="veryfast" selected>Veryfast (recomendado)</option>
-        <option value="medium">Medium (más lento, más chico)</option>
-      </select>
-    </div>
-    <div class="row">
-      <label>Audio</label>
-      <select id="audio">
-        <option value="128k" selected>AAC 128kbps</option>
-        <option value="64k">AAC 64kbps</option>
-        <option value="none">Sin audio</option>
-      </select>
-    </div>
     <div style="margin-top:18px;">
       <button class="primary" id="compressBtn" disabled>Comprimir</button>
     </div>
@@ -150,18 +135,118 @@
     <div class="statPair">
       <div class="stat"><b id="sizeOriginal">—</b><span>Original</span></div>
       <div class="stat"><b id="sizeCompressed">—</b><span>Comprimido</span></div>
-      <div class="stat"><b id="sizeReduction">—</b><span>Reducción</span></div>
     </div>
-    <a id="downloadLink" download="comprimido.mp4"><button class="primary">Descargar video comprimido</button></a>
-  </div>
-
-  <div class="note">
-    Si el motor no carga: algunos navegadores bloquean la carga de WebAssembly cuando el HTML se abre directo como archivo (<code>file://</code>). Si eso pasa, serví esta carpeta con un server local, por ejemplo <code>python3 -m http.server</code>, y abrí <code>http://localhost:8000/video_compressor.html</code>.
+    <a id="downloadLink" download="comprimido.mp4"><button class="primary">Descargar video</button></a>
   </div>
 </div>
 
 <script>
-  console.log("Compresor listo para configurar.");
-</script>
-</body>
-</html>
+// Carga dinámica de librerías externas distribuidas de forma segura
+const FFMPEG_JS = 'https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
+const FFMPEG_CORE = 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js';
+
+let ffmpeg = null;
+let activeFile = null;
+
+function loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+// Elementos de la interfaz gráfica
+const loadBtn = document.getElementById('loadBtn');
+const engineStatus = document.getElementById('engineStatus');
+const loadBar = document.getElementById('loadBar');
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const compressBtn = document.getElementById('compressBtn');
+const crfInput = document.getElementById('crf');
+const vCrf = document.getElementById('v_crf');
+const logZone = document.getElementById('log');
+
+crfInput.oninput = () => vCrf.textContent = `${crfInput.value}`;
+
+// Inicialización e inyección del motor FFmpeg WebAssembly
+loadBtn.onclick = async () => {
+  loadBtn.disabled = true;
+  engineStatus.innerHTML = "Descargando componentes del motor...";
+  loadBar.style.width = "40%";
+  
+  try {
+    await loadScript(FFMPEG_JS);
+    ffmpeg = FFmpeg.createFFmpeg({ 
+      corePath: FFMPEG_CORE,
+      log: true
+    });
+    
+    ffmpeg.setLogger(({ message }) => {
+      logZone.style.display = "block";
+      logZone.textContent += message + "\n";
+      logZone.scrollTop = logZone.scrollHeight;
+    });
+
+    await ffmpeg.load();
+    loadBar.style.width = "100%";
+    engineStatus.innerHTML = "<b>Motor cargado con éxito.</b>";
+    loadBtn.style.display = "none";
+    checkReadyState();
+  } catch (err) {
+    engineStatus.innerHTML = "<span style='color:red;'>Error al inicializar el motor gráfico.</span>";
+    loadBtn.disabled = false;
+    console.error(err);
+  }
+};
+
+// Controladores para la carga local de videos
+dropzone.onclick = () => fileInput.click();
+fileInput.onchange = (e) => handleFile(e.target.files[0]);
+
+function handleFile(file) {
+  if (!file) return;
+  activeFile = file;
+  dropzone.textContent = `Archivo cargado: ${file.name} (${(file.size/1024/1024).toFixed(2)} MB)`;
+  preview.src = URL.createObjectURL(file);
+  preview.style.display = "block";
+  checkReadyState();
+}
+
+function checkReadyState() {
+  if (ffmpeg && ffmpeg.isLoaded() && activeFile) {
+    compressBtn.disabled = false;
+  }
+}
+
+// Proceso local de transcodificación multimedia
+compressBtn.onclick = async () => {
+  compressBtn.disabled = true;
+  logZone.textContent = "Iniciando compresión...\n";
+  
+  const { fetchFile } = FFmpeg;
+  ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(activeFile));
+  
+  const scale = document.getElementById('scale').value;
+  const crf = crfInput.value;
+  
+  let ffmpegArgs = ['-i', 'input.mp4'];
+  if(scale !== "1") {
+    ffmpegArgs.push('-vf', `scale=iw*${scale}:ih*${scale}`);
+  }
+  ffmpegArgs.push('-vcodec', 'libx264', '-crf', crf, '-preset', 'veryfast', 'output.mp4');
+
+  await ffmpeg.run(...ffmpegArgs);
+  
+  const data = ffmpeg.FS('readFile', 'output.mp4');
+  const resultBlob = new Blob([data.buffer], { type: 'video/mp4' });
+  
+  document.getElementById('sizeOriginal').textContent = `${(activeFile.size/1024/1024).toFixed(2)} MB`;
+  document.getElementById('sizeCompressed').textContent = `${(resultBlob.size/1024/1024).toFixed(2)} MB`;
+  
+  const dlLink = document.getElementById('downloadLink');
+  dlLink.href = URL.createObjectURL(resultBlob);
+  document.getElementById('results').style.display = "block";
